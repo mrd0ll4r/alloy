@@ -8,7 +8,6 @@ pub struct SubscriptionRequest {
     pub address: u16,
     pub strategy: EventFilterStrategy,
     pub filters: Vec<EventFilterEntry>,
-    pub callback: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -38,7 +37,6 @@ pub enum APIResult {
     Get {
         value: u16,
     },
-    Subscription,
     Devices {
         virtual_devices: Vec<VirtualDeviceConfig>,
     },
