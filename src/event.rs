@@ -1,6 +1,6 @@
+use crate::Value;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime};
-use crate::Value;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]

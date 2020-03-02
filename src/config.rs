@@ -1,4 +1,4 @@
-use serde::{Serialize,Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// Configuration for one virtual device.
 #[derive(Serialize, Deserialize, Debug, Clone)]
