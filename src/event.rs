@@ -2,7 +2,7 @@ use crate::Value;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Ord, PartialOrd, PartialEq, Eq)]
 #[serde(tag = "type")]
 pub enum ButtonEvent {
     Down,
@@ -11,25 +11,25 @@ pub enum ButtonEvent {
     LongPress { seconds: u64 },
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Ord, PartialOrd, PartialEq, Eq)]
 pub struct AddressedEvent {
     pub address: u16,
     pub event: Event,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Ord, PartialOrd, PartialEq, Eq)]
 pub struct Event {
     pub timestamp: SystemTime,
     pub inner: EventKind,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Ord, PartialOrd, PartialEq, Eq)]
 pub enum EventKind {
     Button(ButtonEvent),
     Change { new_value: Value },
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Ord, PartialOrd, PartialEq, Eq)]
 pub struct EventFilter {
     pub strategy: EventFilterStrategy,
     pub entries: Vec<EventFilterEntry>,
@@ -91,27 +91,27 @@ impl EventFilter {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Ord, PartialOrd, PartialEq, Eq)]
 pub enum EventFilterStrategy {
     Any,
     All,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Ord, PartialOrd, PartialEq, Eq)]
 #[serde(tag = "type")]
 pub enum EventFilterEntry {
     Any,
     Kind { kind: EventFilterKind },
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Ord, PartialOrd, PartialEq, Eq)]
 #[serde(tag = "type")]
 pub enum EventFilterKind {
     Change,
     Button { filter: ButtonEventFilter },
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Ord, PartialOrd, PartialEq, Eq)]
 pub enum ButtonEventFilter {
     Down,
     Up,
