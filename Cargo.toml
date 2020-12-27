@@ -1,6 +1,6 @@
 [package]
 name = "alloy"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Leo Balduf <leobalduf@gmail.com>"]
 edition = "2018"
 
@@ -13,7 +13,7 @@ http = "^0.2"
 failure = {version="^0.1",features=["std"]}
 futures = "^0.3"
 futures-util = "^0.3"
-tokio = { version = "^0.2", features = ["rt-core","tcp","sync"] }
-tokio-util = {version="^0.2", features=["codec"]}
-bytes = "^0.5"
+tokio = { version = "^1.0", features = ["rt","rt-multi-thread","net","sync"] }
+tokio-util = {version="^0.6", features=["codec"]}
+bytes = "^1.0"
 log = {version="^0.4",features=["std"]}

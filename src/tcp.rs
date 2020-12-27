@@ -41,10 +41,10 @@ impl Connection {
         Self::ensure_version(&mut framed).await?;
 
         // Set up some plumbing...
-        let (mut tx_encode, rx_encode) = channel::<Bytes>(100);
+        let (tx_encode, rx_encode) = channel::<Bytes>(100);
         let (tx_decode, mut rx_decode) = channel::<Bytes>(100);
         let (tx_message_out, mut rx_message_out) = channel::<Message>(100);
-        let (mut tx_message_in, rx_message_in) = channel::<Message>(100);
+        let (tx_message_in, rx_message_in) = channel::<Message>(100);
 
         // Decode incoming messages
         task::spawn(async move {
@@ -99,7 +99,7 @@ impl Connection {
     async fn handle_socket_io(
         remote: SocketAddr,
         mut framed: Framed<TcpStream, LengthDelimitedCodec>,
-        mut bytes_in: Sender<Bytes>,
+        bytes_in: Sender<Bytes>,
         mut bytes_out: Receiver<Bytes>,
     ) {
         loop {
@@ -114,8 +114,10 @@ impl Connection {
                         error!("I/O {}: socket read error: {:?}",remote,e);
                         break;
                     }
+                    let in_bytes = in_bytes.unwrap();
+                    debug!("I/O {}: got bytes: {:?}",remote,in_bytes);
 
-                    let res = bytes_in.send(in_bytes.unwrap().freeze()).await;
+                    let res = bytes_in.send(in_bytes.freeze()).await;
                     if let Err(e) = res {
                         // This can only happen if the decoder shut down, i.e. we're dropping the
                         // client.
