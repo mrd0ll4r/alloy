@@ -17,3 +17,4 @@ tokio = { version = "^1.0", features = ["rt","rt-multi-thread","net","sync"] }
 tokio-util = {version="^0.6", features=["codec"]}
 bytes = "^1.0"
 log = {version="^0.4",features=["std"]}
+chrono = {version="^0.4", features= ["serde"]}

@@ -2,10 +2,9 @@ use crate::config::VirtualDeviceConfig;
 use crate::event::{AddressedEvent, EventFilterEntry, EventFilterStrategy};
 use crate::{Address, Value};
 use serde::{Deserialize, Serialize};
-use std::time::SystemTime;
 
 // Protocol version used during handshake.
-pub const PROTOCOL_VERSION: u16 = 2;
+pub const PROTOCOL_VERSION: u16 = 3;
 
 // All possible message types for TCP clients.
 #[derive(Serialize, Deserialize, Debug)]
@@ -41,7 +40,7 @@ pub enum APIResult {
     Subscribe,
     Devices(Vec<VirtualDeviceConfig>),
     Ping,
-    SystemTime(SystemTime),
+    SystemTime(chrono::DateTime<chrono::Utc>),
 }
 
 // A subscription request for TCP clients.

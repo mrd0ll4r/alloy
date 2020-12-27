@@ -1,6 +1,6 @@
 use crate::Value;
 use serde::{Deserialize, Serialize};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Ord, PartialOrd, PartialEq, Eq)]
 #[serde(tag = "type")]
@@ -19,7 +19,7 @@ pub struct AddressedEvent {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Ord, PartialOrd, PartialEq, Eq)]
 pub struct Event {
-    pub timestamp: SystemTime,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
     pub inner: EventKind,
 }
 
