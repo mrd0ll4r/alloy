@@ -1,9 +1,8 @@
 use crate::api::{
     APIRequest, APIResult, Message, SetRequest, SubscriptionRequest, PROTOCOL_VERSION,
 };
-use crate::config::VirtualDeviceConfig;
+use crate::config::UniverseConfig;
 use crate::event::AddressedEvent;
-use crate::{Address, Value};
 use bytes::Bytes;
 use failure::{err_msg, Error, Fail, ResultExt};
 use futures::select;
@@ -23,11 +22,12 @@ use tokio_util::codec::{Framed, LengthDelimitedCodec};
 pub struct SyncClient {
     rt: Arc<tokio::runtime::Runtime>,
     client: Arc<AsyncClient>,
-    event_stream: Arc<Mutex<Option<Receiver<Vec<AddressedEvent>>>>>,
 }
 
 impl SyncClient {
-    pub fn new<A: std::net::ToSocketAddrs>(addr: A) -> Result<SyncClient, Error> {
+    pub fn new<A: std::net::ToSocketAddrs>(
+        addr: A,
+    ) -> Result<(SyncClient, std::sync::mpsc::Receiver<PushedMessage>), Error> {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_io()
             .build()
@@ -38,53 +38,41 @@ impl SyncClient {
             .context("unable to resolve address")?
             .collect();
 
-        let mut client = rt
+        let (client, mut push_msg_stream) = rt
             .block_on(AsyncClient::new(addrs.as_slice()))
             .context("unable to create client")?;
-        let event_stream = client.event_stream().unwrap();
-
-        Ok(SyncClient {
-            rt: Arc::new(rt),
-            client: Arc::new(client),
-            event_stream: Arc::new(Mutex::new(Some(event_stream))),
-        })
-    }
-
-    pub fn event_stream(
-        &mut self,
-    ) -> Result<std::sync::mpsc::Receiver<Vec<AddressedEvent>>, Error> {
-        let stream = self.rt.block_on(self.event_stream.lock()).take();
-        if stream.is_none() {
-            return Err(err_msg("event stream already taken"));
-        }
-        let mut stream = stream.unwrap();
 
         let (tx, rx) = std::sync::mpsc::channel();
 
-        self.rt.spawn(async move {
-            debug!("started event stream async->sync task");
-            while let Some(events) = stream.recv().await {
-                debug!("got events {:?}", events);
-                match tx.send(events) {
+        rt.spawn(async move {
+            debug!("started push messages async->sync task");
+            while let Some(msg) = push_msg_stream.recv().await {
+                debug!("got pushed message {:?}", msg);
+                match tx.send(msg) {
                     Ok(_) => {}
                     Err(e) => {
-                        debug!("unable to send on events channel: {:?}, will close", e);
+                        debug!(
+                            "unable to send on push message channel: {:?}, will close",
+                            e
+                        );
                         break;
                     }
                 }
             }
-            debug!("quit event stream async->sync task");
+            debug!("quit push message async->sync task");
         });
 
-        Ok(rx)
+        Ok((
+            SyncClient {
+                rt: Arc::new(rt),
+                client: Arc::new(client),
+            },
+            rx,
+        ))
     }
 
     pub fn ping(&self) -> Result<(), Error> {
         self.rt.block_on(self.client.ping())
-    }
-
-    pub fn devices(&self) -> Result<Vec<VirtualDeviceConfig>, Error> {
-        self.rt.block_on(self.client.devices())
     }
 
     pub fn subscribe(&self, req: SubscriptionRequest) -> Result<(), Error> {
@@ -94,10 +82,6 @@ impl SyncClient {
     pub fn set(&self, req: Vec<SetRequest>) -> Result<(), Error> {
         self.rt.block_on(self.client.set(req))
     }
-
-    pub fn get(&self, addr: Address) -> Result<Value, Error> {
-        self.rt.block_on(self.client.get(addr))
-    }
 }
 
 // An asynchronous TCP client.
@@ -106,7 +90,6 @@ impl SyncClient {
 pub struct AsyncClient {
     messages_out: Sender<Message>,
     inner: Arc<Mutex<ClientInner>>,
-    event_stream: Option<Receiver<Vec<AddressedEvent>>>,
 }
 
 #[derive(Debug)]
@@ -115,20 +98,30 @@ struct ClientInner {
     current_id: u16,
 }
 
+#[derive(Debug, Clone)]
+pub enum PushedMessage {
+    Event(AddressedEvent),
+    Config(UniverseConfig),
+}
+
 impl AsyncClient {
-    pub async fn new<A: ToSocketAddrs>(addr: A) -> Result<AsyncClient, Error> {
+    pub async fn new<A: ToSocketAddrs>(
+        addr: A,
+    ) -> Result<(AsyncClient, Receiver<PushedMessage>), Error> {
         let conn = TcpStream::connect(addr).await?;
-        conn.set_nodelay(true)?;
 
         Self::new_from_conn(conn).await
     }
 
-    pub async fn new_from_conn(conn: TcpStream) -> Result<AsyncClient, Error> {
+    pub async fn new_from_conn(
+        conn: TcpStream,
+    ) -> Result<(AsyncClient, Receiver<PushedMessage>), Error> {
+        conn.set_nodelay(true)?;
         let conn = Connection::new(conn).await?;
 
         let messages_out = conn.messages_out.clone();
         let messages_in = conn.messages_in;
-        let (events_tx, events_rx) = channel::<Vec<AddressedEvent>>(100);
+        let (push_messages_tx, push_messages_rx) = channel::<PushedMessage>(100);
 
         let mut ci = ClientInner {
             results: Vec::with_capacity(4096),
@@ -144,20 +137,22 @@ impl AsyncClient {
         task::spawn(Self::handle_incoming_messages(
             inner2,
             messages_in,
-            events_tx,
+            push_messages_tx,
         ));
 
-        Ok(AsyncClient {
-            messages_out,
-            inner,
-            event_stream: Some(events_rx),
-        })
+        Ok((
+            AsyncClient {
+                messages_out,
+                inner,
+            },
+            push_messages_rx,
+        ))
     }
 
     async fn handle_incoming_messages(
         inner: Arc<Mutex<ClientInner>>,
         mut messages_in: Receiver<Message>,
-        events_out: Sender<Vec<AddressedEvent>>,
+        push_messages_out: Sender<PushedMessage>,
     ) {
         while let Some(msg) = messages_in.recv().await {
             debug!("received message: {:?}", msg);
@@ -167,13 +162,15 @@ impl AsyncClient {
                     break;
                 }
                 Message::Events(events) => {
-                    let res = events_out.send(events).await;
-                    match res {
-                        Err(e) => {
-                            error!("unable to pass on events: {:?}", e);
-                            break;
+                    for event in events {
+                        let res = push_messages_out.send(PushedMessage::Event(event)).await;
+                        match res {
+                            Err(e) => {
+                                error!("unable to push event: {:?}", e);
+                                break;
+                            }
+                            Ok(()) => {}
                         }
-                        Ok(()) => {}
                     }
                 }
                 Message::Request { id: _, inner: _ } => {
@@ -190,6 +187,16 @@ impl AsyncClient {
                     }
 
                     receiver.unwrap().send(res.map_err(|e| err_msg(e))).unwrap();
+                }
+                Message::Config(cfg) => {
+                    let res = push_messages_out.send(PushedMessage::Config(cfg)).await;
+                    match res {
+                        Err(e) => {
+                            error!("unable to push universe config: {:?}", e);
+                            break;
+                        }
+                        Ok(()) => {}
+                    }
                 }
             }
         }
@@ -220,14 +227,6 @@ impl AsyncClient {
         receiver.await.unwrap()
     }
 
-    pub fn event_stream(&mut self) -> Result<Receiver<Vec<AddressedEvent>>, Error> {
-        let s = self.event_stream.take();
-        match s {
-            None => Err(err_msg("event stream already taken")),
-            Some(s) => Ok(s),
-        }
-    }
-
     pub async fn ping(&self) -> Result<(), Error> {
         let res = self.perform_request(APIRequest::Ping).await?;
         match res {
@@ -239,17 +238,6 @@ impl AsyncClient {
         }
     }
 
-    pub async fn devices(&self) -> Result<Vec<VirtualDeviceConfig>, Error> {
-        let res = self.perform_request(APIRequest::Devices).await?;
-        match res {
-            APIResult::Devices(devices) => Ok(devices),
-            _ => {
-                // what do?
-                panic!("received invalid response, expected Devices, got {:?}", res)
-            }
-        }
-    }
-
     pub async fn set(&self, req: Vec<SetRequest>) -> Result<(), Error> {
         let res = self.perform_request(APIRequest::Set(req)).await?;
         match res {
@@ -257,17 +245,6 @@ impl AsyncClient {
             _ => {
                 // what do?
                 panic!("received invalid response, expected Set, got {:?}", res)
-            }
-        }
-    }
-
-    pub async fn get(&self, addr: Address) -> Result<Value, Error> {
-        let res = self.perform_request(APIRequest::Get(addr)).await?;
-        match res {
-            APIResult::Get(v) => Ok(v),
-            _ => {
-                // what do?
-                panic!("received invalid response, expected Get, got {:?}", res)
             }
         }
     }

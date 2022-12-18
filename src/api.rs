@@ -1,15 +1,16 @@
-use crate::config::VirtualDeviceConfig;
+use crate::config::UniverseConfig;
 use crate::event::{AddressedEvent, EventFilterEntry, EventFilterStrategy};
-use crate::{Address, Value};
+use crate::{Address, OutputValue};
 use serde::{Deserialize, Serialize};
 
 // Protocol version used during handshake.
-pub const PROTOCOL_VERSION: u16 = 3;
+pub const PROTOCOL_VERSION: u16 = 4;
 
 // All possible message types for TCP clients.
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Message {
     Version(u16),
+    Config(UniverseConfig),
     Events(Vec<AddressedEvent>),
     Request {
         id: u16,
@@ -24,10 +25,8 @@ pub enum Message {
 // All possible request types for TCP clients.
 #[derive(Serialize, Deserialize, Debug)]
 pub enum APIRequest {
-    Get(Address),
     Set(Vec<SetRequest>),
     Subscribe(SubscriptionRequest),
-    Devices,
     Ping,
     SystemTime,
 }
@@ -35,10 +34,8 @@ pub enum APIRequest {
 // The corresponding response types for TCP clients.
 #[derive(Serialize, Deserialize, Debug)]
 pub enum APIResult {
-    Get(Value),
     Set,
     Subscribe,
-    Devices(Vec<VirtualDeviceConfig>),
     Ping,
     SystemTime(chrono::DateTime<chrono::Utc>),
 }
@@ -54,13 +51,6 @@ pub struct SubscriptionRequest {
 // A request to set a value for TCP clients.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SetRequest {
-    pub value: Value,
-    pub target: SetRequestTarget,
-}
-
-// The target of a set request.
-#[derive(Serialize, Deserialize, Debug)]
-pub enum SetRequestTarget {
-    Address(Address),
-    Group(String),
+    pub value: OutputValue,
+    pub address: Address,
 }

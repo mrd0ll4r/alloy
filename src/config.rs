@@ -1,36 +1,65 @@
-use crate::{HIGH, LOW};
+use crate::Address;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
-/// Configuration for one virtual device.
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct VirtualDeviceConfig {
-    pub address: u16,
+pub struct UniverseConfig {
+    pub version: u64,
+    pub devices: Vec<DeviceConfig>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct DeviceConfig {
     pub alias: String,
-    pub groups: Vec<String>,
-    pub mapping: MappingConfig,
-    pub read_only: bool,
+    pub device_type: DeviceType,
+
+    pub inputs: Vec<InputPortConfig>,
+    pub outputs: Vec<OutputPortConfig>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum ValueScaling {
-    Linear { from: u16, to: u16 },
-    Logarithmic,
+pub enum DeviceType {
+    DHT22,
+    DHT22Expander,
+    PCA9685,
+    DS18,
+    MCP23017,
+    BME280,
+    GPIO,
+    FanHeater,
 }
 
-impl Default for ValueScaling {
-    fn default() -> Self {
-        ValueScaling::Linear {
-            from: LOW,
-            to: HIGH,
-        }
-    }
-}
-
-/// Mapping of one virtual device to one port on a hardware device.
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct MappingConfig {
-    pub device: String,
+pub struct InputPortConfig {
+    pub alias: String,
+    pub input_type: InputValueType,
+    pub tags: HashSet<String>,
     pub port: u8,
-    #[serde(default)]
-    pub scaling: Option<ValueScaling>,
+    pub address: Address,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub enum InputValueType {
+    Binary,
+    Temperature,
+    Humidity,
+    Pressure,
+    Continuous,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct OutputPortConfig {
+    pub alias: String,
+    pub tags: HashSet<String>,
+    pub port: u8,
+    pub address: Address,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialOrd, PartialEq)]
+pub enum InputValue {
+    Binary(bool),
+    Temperature(f64),
+    Humidity(f64),
+    Pressure(f64),
+    Continuous(u16),
 }
