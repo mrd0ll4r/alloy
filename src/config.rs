@@ -27,6 +27,7 @@ pub enum DeviceType {
     BME280,
     GPIO,
     FanHeater,
+    ButtonExpander
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
