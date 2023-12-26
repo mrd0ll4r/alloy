@@ -59,9 +59,18 @@ pub struct OutputPortConfig {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialOrd, PartialEq)]
 pub enum InputValue {
+    /// Binary values.
     Binary(bool),
+
+    /// Temperature values, in °C.
     Temperature(f64),
+
+    /// Relative humidity in percent.
     Humidity(f64),
+
+    /// Absolute air pressure in pascals.
     Pressure(f64),
+
+    /// A 16-bit value, usually used for outputs.
     Continuous(u16),
 }
