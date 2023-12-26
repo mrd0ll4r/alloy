@@ -3,11 +3,12 @@ use crate::api::{
 };
 use crate::config::UniverseConfig;
 use crate::event::AddressedEvent;
+use anyhow::{bail, Context, Error};
 use bytes::Bytes;
-use failure::{err_msg, Error, Fail, ResultExt};
 use futures::select;
 use futures::{SinkExt, StreamExt};
 use futures_util::future::FutureExt;
+use log::{debug, error};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::{TcpStream, ToSocketAddrs};
@@ -186,7 +187,10 @@ impl AsyncClient {
                         break;
                     }
 
-                    receiver.unwrap().send(res.map_err(|e| err_msg(e))).unwrap();
+                    receiver
+                        .unwrap()
+                        .send(res.map_err(|e| anyhow::anyhow!(e)))
+                        .unwrap();
                 }
                 Message::Config(cfg) => {
                     let res = push_messages_out.send(PushedMessage::Config(cfg)).await;
@@ -210,7 +214,7 @@ impl AsyncClient {
             let next_id = (inner.current_id + 1) % 4096;
             if inner.results[next_id as usize].is_some() {
                 // TODO wait
-                return Err(err_msg("too many open requests!"));
+                bail!("too many open requests")
             }
 
             inner.current_id = next_id;
@@ -274,13 +278,13 @@ pub struct Connection {
 }
 
 /// Errors during the handshake procedure.
-#[derive(Debug, Fail)]
+#[derive(Debug, thiserror::Error)]
 pub enum HandshakeError {
-    #[fail(display = "did not receive a version message")]
+    #[error("did not receive a version message")]
     NoVersionReceived,
-    #[fail(display = "protocol version mismatch")]
+    #[error("protocol version mismatch")]
     VersionMismatch,
-    #[fail(display = "I/O error :)")]
+    #[error("I/O error :)")]
     IO,
 }
 

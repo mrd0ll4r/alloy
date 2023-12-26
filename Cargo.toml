@@ -1,20 +1,25 @@
 [package]
 name = "alloy"
-version = "0.4.0"
+version = "0.5.0"
 authors = ["Leo Balduf <leobalduf@gmail.com>"]
-edition = "2018"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+edition = "2021"
 
 [dependencies]
-serde = {version="^1",features=["derive"]}
-serde_json = "^1"
+anyhow = {version="^1", features = ["backtrace"]}
+thiserror = "^1"
+log = {version="^0.4",features=["std"]}
+chrono = {version="^0.4", features= ["serde"]}
+
+# HTTP, TCP
 http = "^0.2"
-failure = {version="^0.1",features=["std"]}
+bytes = "^1.0"
+
+# Async, Tokio
 futures = "^0.3"
 futures-util = "^0.3"
 tokio = { version = "^1.0", features = ["rt","rt-multi-thread","net","sync"] }
-tokio-util = {version="^0.6", features=["codec"]}
-bytes = "^1.0"
-log = {version="^0.4",features=["std"]}
-chrono = {version="^0.4", features= ["serde"]}
+tokio-util = {version="^0.7", features=["codec"]}
+
+# Serde
+serde = {version="^1",features=["derive"]}
+serde_json = "^1"
