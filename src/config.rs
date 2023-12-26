@@ -21,13 +21,14 @@ pub struct DeviceConfig {
 pub enum DeviceType {
     DHT22,
     DHT22Expander,
+    DS18B20Expander,
     PCA9685,
     DS18,
     MCP23017,
     BME280,
     GPIO,
     FanHeater,
-    ButtonExpander
+    ButtonExpander,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
