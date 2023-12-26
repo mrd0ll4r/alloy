@@ -29,6 +29,13 @@ pub enum EventKind {
     Update { new_value: InputValue },
 }
 
+/// A timestamped input value.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimestampedInputValue {
+    pub ts: chrono::DateTime<chrono::Utc>,
+    pub value: Result<InputValue, String>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Ord, PartialOrd, PartialEq, Eq)]
 pub struct EventFilter {
     pub strategy: EventFilterStrategy,
