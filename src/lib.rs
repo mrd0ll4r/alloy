@@ -4,7 +4,6 @@ pub mod amqp;
 pub mod api;
 pub mod config;
 pub mod event;
-pub mod tcp;
 
 pub type Address = u16;
 pub type OutputValue = u16;
