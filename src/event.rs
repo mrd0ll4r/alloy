@@ -24,7 +24,7 @@ pub enum ButtonEvent {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AddressedEvent {
-    pub address: u16,
+    pub alias: String,
     pub event: Event,
 }
 
