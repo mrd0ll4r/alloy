@@ -47,6 +47,7 @@ pub enum InputValueType {
     Humidity,
     Pressure,
     Continuous,
+    Gas,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -73,4 +74,7 @@ pub enum InputValue {
 
     /// A 16-bit value, usually used for outputs.
     Continuous(u16),
+
+    /// Gas, in Ohm.
+    Gas(f64),
 }
