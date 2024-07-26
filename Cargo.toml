@@ -13,8 +13,8 @@ log = {version="^0.4",features=["std"]}
 chrono = {version="^0.4", features= ["serde"]}
 
 # HTTP, TCP
-http = "^0.2"
-bytes = "^1.0"
+http = "^1"
+bytes = "^1"
 
 # Async, Tokio
 futures = "^0.3"
