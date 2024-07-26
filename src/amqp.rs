@@ -1,3 +1,4 @@
+use crate::config::InputValueType;
 use crate::event::AddressedEvent;
 use anyhow::{bail, Context, Result};
 use futures::{Stream, StreamExt};
@@ -15,25 +16,33 @@ use std::str::FromStr;
 use std::task::Poll;
 use tokio::sync::mpsc::{Receiver, Sender};
 
-pub const EXCHANGE_NAME_SUBMARINE_INPUT: &str = "submarine.input";
+pub const EXCHANGE_NAME_SHACK_INPUT: &str = "shack.input";
 pub const EXCHANGE_NAME_LOGGING: &str = "logging";
 
 pub const ROUTING_PREFIX_ALIAS: &str = "alias";
+pub const ROUTING_PREFIX_TYPE: &str = "type";
 pub const ROUTING_PREFIX_APPLICATION: &str = "application";
 
+pub const ROUTING_KEY_TEMPERATURE: &str = "temperature";
+pub const ROUTING_KEY_HUMIDITY: &str = "humidity";
+pub const ROUTING_KEY_BINARY: &str = "binary";
+pub const ROUTING_KEY_PRESSURE: &str = "pressure";
+pub const ROUTING_KEY_GAS: &str = "gas";
+pub const ROUTING_KEY_CONTINUOUS: &str = "continuous";
+
 #[derive(Debug)]
-pub struct ExchangeSubmarineInput {
+pub struct ExchangeShackInput {
     client: Client,
 }
 
-impl ExchangeSubmarineInput {
+impl ExchangeShackInput {
     pub async fn new(
         addr: &str,
-        subscriptions: &[RoutingKeySubscription<SubmarineInputRoutingKey>],
-    ) -> Result<ExchangeSubmarineInput> {
+        subscriptions: &[RoutingKeySubscription<ShackInputRoutingKey>],
+    ) -> Result<ExchangeShackInput> {
         let client: Client = Client::new(
             addr,
-            ExchangeParameters::SubmarineInput,
+            ExchangeParameters::ShackInput,
             subscriptions
                 .iter()
                 .map(|k| k.to_routing_key())
@@ -43,28 +52,28 @@ impl ExchangeSubmarineInput {
         .await
         .context("unable to connect to set up AMQP client")?;
 
-        Ok(ExchangeSubmarineInput { client })
+        Ok(ExchangeShackInput { client })
     }
 
     pub async fn new_publisher(
         &self,
-        routing_key: SubmarineInputRoutingKey,
-    ) -> Result<ExchangeSubmarineInputPublisher> {
+        routing_key: ShackInputRoutingKey,
+    ) -> Result<ExchangeShackInputPublisher> {
         let publisher = self
             .client
             .new_publisher()
             .await
             .context("unable to set up publisher")?;
 
-        Ok(ExchangeSubmarineInputPublisher {
+        Ok(ExchangeShackInputPublisher {
             publisher,
             routing_key: routing_key.to_routing_key(),
         })
     }
 }
 
-impl Stream for ExchangeSubmarineInput {
-    type Item = Result<(SubmarineInputRoutingKey, AddressedEvent)>;
+impl Stream for ExchangeShackInput {
+    type Item = Result<(ShackInputRoutingKey, AddressedEvent)>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -73,7 +82,7 @@ impl Stream for ExchangeSubmarineInput {
         self.client.poll_next_unpin(cx).map(|res| {
             res.map(|res| {
                 res.and_then(|(key, data)| {
-                    let routing_key = match SubmarineInputRoutingKey::from_str(&key) {
+                    let routing_key = match ShackInputRoutingKey::from_str(&key) {
                         Ok(k) => k,
                         Err(e) => return Err(e.context("unable to decode routing key").into()),
                     };
@@ -89,12 +98,12 @@ impl Stream for ExchangeSubmarineInput {
 }
 
 #[derive(Debug)]
-pub struct ExchangeSubmarineInputPublisher {
+pub struct ExchangeShackInputPublisher {
     publisher: Publisher,
     routing_key: String,
 }
 
-impl ExchangeSubmarineInputPublisher {
+impl ExchangeShackInputPublisher {
     pub async fn publish_event(&self, event: &AddressedEvent) -> Result<()> {
         let payload = encode_messages(&event).context("unable to encode message")?;
         self.publisher
@@ -126,36 +135,81 @@ pub trait RoutingKey: Sized {
 }
 
 #[derive(Clone, Debug)]
-pub struct SubmarineInputRoutingKey {
-    pub alias: String,
+pub struct ShackInputRoutingKey {
+    pub input_value_type: Option<InputValueType>,
+    pub alias: Option<String>,
 }
 
-impl SubmarineInputRoutingKey {
-    pub fn from_alias(alias: String) -> SubmarineInputRoutingKey {
-        SubmarineInputRoutingKey { alias }
+impl ShackInputRoutingKey {
+    pub fn from_alias(alias: String) -> ShackInputRoutingKey {
+        ShackInputRoutingKey {
+            alias: Some(alias),
+            input_value_type: None,
+        }
     }
 }
 
-impl RoutingKey for SubmarineInputRoutingKey {
+impl RoutingKey for ShackInputRoutingKey {
     fn to_routing_key(&self) -> String {
-        format!("{}.{}", ROUTING_PREFIX_ALIAS, self.alias)
+        format!(
+            "{}.{}.{}.{}",
+            ROUTING_PREFIX_TYPE,
+            self.input_value_type
+                .as_ref()
+                .map(|i| {
+                    match i {
+                        InputValueType::Binary => ROUTING_KEY_BINARY,
+                        InputValueType::Temperature => ROUTING_KEY_TEMPERATURE,
+                        InputValueType::Humidity => ROUTING_KEY_HUMIDITY,
+                        InputValueType::Pressure => ROUTING_KEY_PRESSURE,
+                        InputValueType::Continuous => ROUTING_KEY_CONTINUOUS,
+                        InputValueType::Gas => ROUTING_KEY_GAS,
+                    }
+                })
+                .unwrap_or_else(|| "*"),
+            ROUTING_PREFIX_ALIAS,
+            self.alias
+                .as_ref()
+                .map(|s| s.as_str())
+                .unwrap_or_else(|| "*"),
+        )
     }
 
     fn from_str(key: &str) -> Result<Self> {
         let split: Vec<_> = key.split('.').collect();
-        if split.len() != 2 {
-            bail!("expected 2 parts, found {}", split.len());
+        if split.len() != 4 {
+            bail!("expected 4 parts, found {}", split.len());
         }
-        if *split.get(0).unwrap() != ROUTING_PREFIX_ALIAS {
+        if *split.get(0).unwrap() != ROUTING_PREFIX_TYPE {
             bail!(
-                "expected prefix {}, found {}",
-                ROUTING_PREFIX_ALIAS,
+                "expected routing key element {} at position 0, found {}",
+                ROUTING_PREFIX_TYPE,
                 split.get(0).unwrap()
             );
         }
+        if *split.get(2).unwrap() != ROUTING_PREFIX_ALIAS {
+            bail!(
+                "expected routing key element {} at position 2, found {}",
+                ROUTING_PREFIX_ALIAS,
+                split.get(2).unwrap()
+            );
+        }
 
-        Ok(SubmarineInputRoutingKey {
-            alias: split.get(1).unwrap().to_string(),
+        let input_value_type = match *split.get(1).unwrap() {
+            ROUTING_KEY_GAS => InputValueType::Gas,
+            ROUTING_KEY_TEMPERATURE => InputValueType::Temperature,
+            ROUTING_KEY_BINARY => InputValueType::Binary,
+            ROUTING_KEY_PRESSURE => InputValueType::Pressure,
+            ROUTING_KEY_HUMIDITY => InputValueType::Humidity,
+            ROUTING_KEY_CONTINUOUS => InputValueType::Continuous,
+            _ => {
+                bail!("unknown input value type {}", split.get(1).unwrap())
+            }
+        };
+
+        Ok(ShackInputRoutingKey {
+            input_value_type: Some(input_value_type),
+            alias: Some(split.get(3).unwrap().to_string()),
         })
     }
 }
@@ -204,21 +258,21 @@ impl RoutingKey for LoggingRoutingKey {
 
 #[derive(Clone, Debug)]
 enum ExchangeParameters {
-    SubmarineInput,
+    ShackInput,
     Logging,
 }
 
 impl ExchangeParameters {
     fn name(&self) -> &str {
         match self {
-            ExchangeParameters::SubmarineInput => EXCHANGE_NAME_SUBMARINE_INPUT,
+            ExchangeParameters::ShackInput => EXCHANGE_NAME_SHACK_INPUT,
             ExchangeParameters::Logging => EXCHANGE_NAME_LOGGING,
         }
     }
 
     fn message_ttl(&self) -> ShortString {
         match self {
-            ExchangeParameters::SubmarineInput => {
+            ExchangeParameters::ShackInput => {
                 // 10 seconds
                 ShortString::from("10000")
             }
@@ -231,7 +285,7 @@ impl ExchangeParameters {
 
     fn durable(&self) -> bool {
         match self {
-            ExchangeParameters::SubmarineInput => false,
+            ExchangeParameters::ShackInput => false,
             ExchangeParameters::Logging => true,
         }
     }
@@ -245,10 +299,7 @@ async fn connect(addr: &str) -> Result<Connection> {
 }
 
 async fn set_up_exchanges(c: &Channel) -> Result<()> {
-    let exchanges = vec![
-        ExchangeParameters::Logging,
-        ExchangeParameters::SubmarineInput,
-    ];
+    let exchanges = vec![ExchangeParameters::Logging, ExchangeParameters::ShackInput];
 
     for p in exchanges {
         c.exchange_declare(
