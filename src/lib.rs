@@ -13,12 +13,12 @@ pub fn map_range(from_range: (f64, f64), to_range: (f64, f64), s: f64) -> f64 {
     to_range.0 + (s - from_range.0) * (to_range.1 - to_range.0) / (from_range.1 - from_range.0)
 }
 
-/// Maps a value from one range to a Value (16 bit unsigned integer).
+/// Maps a value from one range to a Value (16-bit unsigned integer).
 pub fn map_to_value(from_range: (f64, f64), s: f64) -> OutputValue {
     map_range(from_range, (LOW as f64, HIGH as f64), s) as OutputValue
 }
 
-/// Maps a Value (16 bit unsigned integer) to another range.
+/// Maps a Value (16-bit unsigned integer) to another range.
 pub fn map_from_value(to_range: (f64, f64), v: OutputValue) -> f64 {
     map_range((LOW as f64, HIGH as f64), to_range, v as f64)
 }
