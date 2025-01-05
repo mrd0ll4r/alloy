@@ -1,6 +1,6 @@
 use crate::config::InputValueType;
 use crate::event::AddressedEvent;
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use futures::{Stream, StreamExt};
 use lapin::message::Delivery;
 use lapin::options::{
@@ -17,11 +17,25 @@ use std::task::Poll;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 pub const EXCHANGE_NAME_SHACK_INPUT: &str = "shack.input";
+pub const EXCHANGE_NAME_SHACK_MQTT: &str = "shack.mqtt";
 pub const EXCHANGE_NAME_LOGGING: &str = "logging";
 
 pub const ROUTING_PREFIX_ALIAS: &str = "alias";
 pub const ROUTING_PREFIX_TYPE: &str = "type";
 pub const ROUTING_PREFIX_APPLICATION: &str = "application";
+
+// Prefixes for Tasmota MQTT routing keys.
+pub const ROUTING_PREFIX_TASMOTA_STAT: &str = "stat";
+pub const ROUTING_PREFIX_TASMOTA_TELE: &str = "tele";
+
+// Routing key segments for Tasmota MQTT routing keys.
+pub const ROUTING_KEY_TASMOTA_SENSOR: &str = "SENSOR";
+pub const ROUTING_KEY_TASMOTA_STATE: &str = "STATE";
+pub const ROUTING_KEY_TASMOTA_RESULT: &str = "RESULT";
+pub const ROUTING_KEY_TASMOTA_LWT: &str = "LWT";
+pub const ROUTING_KEY_TASMOTA_INFO1: &str = "INFO1";
+pub const ROUTING_KEY_TASMOTA_INFO2: &str = "INFO2";
+pub const ROUTING_KEY_TASMOTA_INFO3: &str = "INFO3";
 
 pub const ROUTING_KEY_TEMPERATURE: &str = "temperature";
 pub const ROUTING_KEY_HUMIDITY: &str = "humidity";
@@ -105,12 +119,81 @@ pub struct ExchangeShackInputPublisher {
 
 impl ExchangeShackInputPublisher {
     pub async fn publish_event(&self, event: &AddressedEvent) -> Result<()> {
+        self.publish_raw(&self.routing_key, event).await
+    }
+
+    pub async fn publish_raw(&self, routing_key: &str, event: &AddressedEvent) -> Result<()> {
         let payload = encode_messages(&event).context("unable to encode message")?;
         self.publisher
-            .post_message(&self.routing_key, &payload)
+            .post_message(routing_key, &payload)
             .await
             .context("unable to post message")?;
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct ExchangeShackMQTT {
+    client: Client,
+}
+
+impl ExchangeShackMQTT {
+    pub async fn new(
+        addr: &str,
+        subscriptions: &[RoutingKeySubscription<ShackMQTTRoutingKey>],
+    ) -> Result<Self> {
+        let client: Client = Client::new(
+            addr,
+            ExchangeParameters::ShackMQTT,
+            subscriptions
+                .iter()
+                .map(|k| k.to_routing_key())
+                .collect::<Vec<_>>()
+                .as_slice(),
+        )
+        .await
+        .context("unable to connect to set up AMQP client")?;
+
+        Ok(ExchangeShackMQTT { client })
+    }
+
+    /*
+    pub async fn new_publisher(
+        &self,
+        routing_key: ShackInputRoutingKey,
+    ) -> Result<ExchangeShackInputPublisher> {
+        let publisher = self
+            .client
+            .new_publisher()
+            .await
+            .context("unable to set up publisher")?;
+
+        Ok(ExchangeShackInputPublisher {
+            publisher,
+            routing_key: routing_key.to_routing_key(),
+        })
+    }
+     */
+}
+
+impl Stream for ExchangeShackMQTT {
+    type Item = Result<(ShackMQTTRoutingKey, Vec<u8>)>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        self.client.poll_next_unpin(cx).map(|res| {
+            res.map(|res| {
+                res.and_then(|(key, data)| {
+                    let routing_key = match ShackMQTTRoutingKey::from_str(&key) {
+                        Ok(k) => k,
+                        Err(e) => return Err(e.context("unable to decode routing key").into()),
+                    };
+                    Ok((routing_key, data))
+                })
+            })
+        })
     }
 }
 
@@ -135,6 +218,142 @@ pub trait RoutingKey: Sized {
 }
 
 #[derive(Clone, Debug)]
+#[non_exhaustive]
+pub enum ShackMQTTRoutingKey {
+    Tasmota {
+        message_type: Option<TasmotaRoutingKey>,
+        device_id: Option<String>,
+    },
+}
+
+impl RoutingKey for ShackMQTTRoutingKey {
+    fn to_routing_key(&self) -> String {
+        match self {
+            ShackMQTTRoutingKey::Tasmota {
+                message_type,
+                device_id,
+            } => {
+                format!(
+                    "{}.{}.{}",
+                    message_type
+                        .as_ref()
+                        .map(|ty| {
+                            match ty {
+                                TasmotaRoutingKey::StatResult => ROUTING_PREFIX_TASMOTA_STAT,
+                                TasmotaRoutingKey::TeleState => ROUTING_PREFIX_TASMOTA_TELE,
+                                TasmotaRoutingKey::TeleSensor => ROUTING_PREFIX_TASMOTA_TELE,
+                                TasmotaRoutingKey::TeleLwt => ROUTING_PREFIX_TASMOTA_TELE,
+                                TasmotaRoutingKey::TeleInfo1 => ROUTING_PREFIX_TASMOTA_TELE,
+                                TasmotaRoutingKey::TeleInfo2 => ROUTING_PREFIX_TASMOTA_TELE,
+                                TasmotaRoutingKey::TeleInfo3 => ROUTING_PREFIX_TASMOTA_TELE,
+                            }
+                        })
+                        .unwrap_or_else(|| "*"),
+                    device_id
+                        .as_ref()
+                        .map(|id| format!("tasmota_{}", id))
+                        .unwrap_or_else(|| "*".to_string()),
+                    message_type
+                        .as_ref()
+                        .map(|ty| {
+                            match ty {
+                                TasmotaRoutingKey::StatResult => ROUTING_KEY_TASMOTA_RESULT,
+                                TasmotaRoutingKey::TeleState => ROUTING_KEY_TASMOTA_STATE,
+                                TasmotaRoutingKey::TeleSensor => ROUTING_KEY_TASMOTA_SENSOR,
+                                TasmotaRoutingKey::TeleLwt => ROUTING_KEY_TASMOTA_LWT,
+                                TasmotaRoutingKey::TeleInfo1 => ROUTING_KEY_TASMOTA_INFO1,
+                                TasmotaRoutingKey::TeleInfo2 => ROUTING_KEY_TASMOTA_INFO2,
+                                TasmotaRoutingKey::TeleInfo3 => ROUTING_KEY_TASMOTA_INFO3,
+                            }
+                        })
+                        .unwrap_or_else(|| "*"),
+                )
+            }
+        }
+    }
+
+    fn from_str(routing_key: &str) -> Result<Self> {
+        let split = routing_key.split('.').collect::<Vec<_>>();
+        ensure!(split.len() == 3, "unsupported routing key");
+
+        // Decode the ID
+        let device_id = match split.get(1).unwrap().strip_prefix("tasmota_") {
+            None => {
+                bail!("invalid device ID routing key segment: must start with tasmota_");
+            }
+            Some(id) => id.to_string(),
+        };
+
+        match split[0] {
+            ROUTING_PREFIX_TASMOTA_STAT => {
+                if *split.get(2).unwrap() != ROUTING_KEY_TASMOTA_RESULT {
+                    bail!("unsupported routing key");
+                }
+                Ok(Self::Tasmota {
+                    message_type: Some(TasmotaRoutingKey::StatResult),
+                    device_id: Some(device_id),
+                })
+            }
+            ROUTING_PREFIX_TASMOTA_TELE => match *split.get(2).unwrap() {
+                ROUTING_KEY_TASMOTA_STATE => Ok(Self::Tasmota {
+                    message_type: Some(TasmotaRoutingKey::TeleState),
+                    device_id: Some(device_id),
+                }),
+                ROUTING_KEY_TASMOTA_SENSOR => Ok(Self::Tasmota {
+                    message_type: Some(TasmotaRoutingKey::TeleSensor),
+                    device_id: Some(device_id),
+                }),
+                ROUTING_KEY_TASMOTA_LWT => Ok(Self::Tasmota {
+                    message_type: Some(TasmotaRoutingKey::TeleLwt),
+                    device_id: Some(device_id),
+                }),
+                ROUTING_KEY_TASMOTA_INFO1 => Ok(Self::Tasmota {
+                    message_type: Some(TasmotaRoutingKey::TeleInfo1),
+                    device_id: Some(device_id),
+                }),
+                ROUTING_KEY_TASMOTA_INFO2 => Ok(Self::Tasmota {
+                    message_type: Some(TasmotaRoutingKey::TeleInfo2),
+                    device_id: Some(device_id),
+                }),
+                ROUTING_KEY_TASMOTA_INFO3 => Ok(Self::Tasmota {
+                    message_type: Some(TasmotaRoutingKey::TeleInfo3),
+                    device_id: Some(device_id),
+                }),
+                _ => bail!("unsupported routing key"),
+            },
+            _ => {
+                bail!("unsupported routing key");
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum TasmotaRoutingKey {
+    StatResult,
+    TeleState,
+    TeleSensor,
+    TeleLwt,
+    TeleInfo1,
+    TeleInfo2,
+    TeleInfo3,
+}
+
+impl TasmotaRoutingKey {
+    pub fn to_str(&self) -> &str {
+        match self {
+            TasmotaRoutingKey::StatResult => "stat_result",
+            TasmotaRoutingKey::TeleState => "tele_state",
+            TasmotaRoutingKey::TeleSensor => "tele_sensor",
+            TasmotaRoutingKey::TeleLwt => "tele_lwt",
+            TasmotaRoutingKey::TeleInfo1 => "tele_info1",
+            TasmotaRoutingKey::TeleInfo2 => "tele_info2",
+            TasmotaRoutingKey::TeleInfo3 => "tele_info3",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct ShackInputRoutingKey {
     pub input_value_type: Option<InputValueType>,
     pub alias: Option<String>,
@@ -145,6 +364,16 @@ impl ShackInputRoutingKey {
         ShackInputRoutingKey {
             alias: Some(alias),
             input_value_type: None,
+        }
+    }
+
+    pub fn from_value_type_and_alias(
+        value_type: InputValueType,
+        alias: String,
+    ) -> ShackInputRoutingKey {
+        ShackInputRoutingKey {
+            alias: Some(alias),
+            input_value_type: Some(value_type),
         }
     }
 }
@@ -259,6 +488,7 @@ impl RoutingKey for LoggingRoutingKey {
 #[derive(Clone, Debug)]
 enum ExchangeParameters {
     ShackInput,
+    ShackMQTT,
     Logging,
 }
 
@@ -266,6 +496,7 @@ impl ExchangeParameters {
     fn name(&self) -> &str {
         match self {
             ExchangeParameters::ShackInput => EXCHANGE_NAME_SHACK_INPUT,
+            ExchangeParameters::ShackMQTT => EXCHANGE_NAME_SHACK_MQTT,
             ExchangeParameters::Logging => EXCHANGE_NAME_LOGGING,
         }
     }
@@ -280,6 +511,10 @@ impl ExchangeParameters {
                 // 60 seconds
                 ShortString::from("60000")
             }
+            ExchangeParameters::ShackMQTT => {
+                // 60 seconds
+                ShortString::from("60000")
+            }
         }
     }
 
@@ -287,6 +522,7 @@ impl ExchangeParameters {
         match self {
             ExchangeParameters::ShackInput => false,
             ExchangeParameters::Logging => true,
+            ExchangeParameters::ShackMQTT => false,
         }
     }
 }
@@ -299,7 +535,11 @@ async fn connect(addr: &str) -> Result<Connection> {
 }
 
 async fn set_up_exchanges(c: &Channel) -> Result<()> {
-    let exchanges = vec![ExchangeParameters::Logging, ExchangeParameters::ShackInput];
+    let exchanges = vec![
+        ExchangeParameters::Logging,
+        ExchangeParameters::ShackInput,
+        ExchangeParameters::ShackMQTT,
+    ];
 
     for p in exchanges {
         c.exchange_declare(

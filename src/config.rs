@@ -29,6 +29,7 @@ pub enum DeviceType {
     GPIO,
     FanHeater,
     ButtonExpander,
+    TasmotaRelayExpander,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
